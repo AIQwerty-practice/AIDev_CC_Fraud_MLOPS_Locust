@@ -5,11 +5,11 @@ services:
       dockerfile: deploy/landing/Dockerfile
     image: fraud-landing:latest
     environment:
-      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://app.barbaraplascencia.com}
-      API_PUBLIC_URL: ${API_PUBLIC_URL:-https://api.barbaraplascencia.com}
-      MLFLOW_PUBLIC_URL: ${MLFLOW_PUBLIC_URL:-https://mlflow.barbaraplascencia.com}
-      H2O_PUBLIC_URL: ${H2O_PUBLIC_URL:-https://h2o.barbaraplascencia.com}
-      GITHUB_URL: ${GITHUB_URL:-https://github.com/AIQwerty-practice/AIDev_CC_Fraud_MLOPS}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://app.yourdomain.com}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-https://api.yourdomain.com}
+      MLFLOW_PUBLIC_URL: ${MLFLOW_PUBLIC_URL:-https://mlflow.yourdomain.com}
+      LOCUST_PUBLIC_URL: ${LOCUST_PUBLIC_URL:-https://locust.yourdomain.com}
+      GITHUB_URL: ${GITHUB_URL:-https://github.com/your-account/AIDev_CC_Fraud_MLOPS_Locust}
     expose: ["80"]
     networks: [project_network]
 
@@ -26,7 +26,7 @@ services:
       frontend: {condition: service_started}
       backend: {condition: service_healthy}
       mlflow: {condition: service_healthy}
-      h2o: {condition: service_healthy}
+      locust: {condition: service_healthy}
     networks: [project_network]
 
   mlflow:
@@ -35,7 +35,7 @@ services:
       service: mlflow
     restart: unless-stopped
     environment:
-      MLFLOW_SERVER_ALLOWED_HOSTS: ${MLFLOW_SERVER_ALLOWED_HOSTS:-mlflow,localhost,127.0.0.1,backend,trainer,mlflow.barbaraplascencia.com}
+      MLFLOW_SERVER_ALLOWED_HOSTS: ${MLFLOW_SERVER_ALLOWED_HOSTS:-mlflow,localhost,127.0.0.1,backend,trainer,mlflow.yourdomain.com}
 
   trainer:
     extends:
@@ -49,14 +49,35 @@ services:
     restart: unless-stopped
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
     environment:
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://fraud.barbaraplascencia.com,https://app.barbaraplascencia.com}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://fraud.yourdomain.com,https://app.yourdomain.com}
 
   frontend:
     extends:
       file: docker-compose.yml
       service: frontend
     restart: unless-stopped
-    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--server.enableCORS=true", "--server.enableXsrfProtection=true", "--browser.serverAddress=app.barbaraplascencia.com", "--browser.serverPort=443"]
+    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--server.enableCORS=true", "--server.enableXsrfProtection=true", "--browser.serverAddress=app.yourdomain.com", "--browser.serverPort=443"]
+
+  locust:
+    build:
+      context: .
+      dockerfile: load_tests/Dockerfile
+    image: fraud-locust:latest
+    restart: unless-stopped
+    environment:
+      LOCUST_HOST: ${INTERNAL_API_URL:-http://backend:8000}
+      LOCUST_SAMPLE_CSV: /app/backend/data/sample_test.csv
+      LOCUST_SAMPLE_ROWS: ${LOCUST_SAMPLE_ROWS:-25}
+    expose: ["8089"]
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8089/')"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [project_network]
 
   h2o:
     extends:
