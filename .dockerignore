@@ -1,4 +1,5 @@
-backend/data/
+backend/data/*
+!backend/data/sample_test.csv
 backend/model_artifacts/
 mlruns/
 mlartifacts/
