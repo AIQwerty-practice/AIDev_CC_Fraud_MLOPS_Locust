@@ -10,17 +10,11 @@ We suggest to run the app and containers on chrome with dark mode theme in your 
 You can do this in the Google Chrome browser by going to Settings > Appearance > Mode and selecting "Dark"
 ## Architecture
 
-```mermaid
-flowchart LR
-    C["YAML experiment config"] --> T["train.py"]
-    D["Local raw/processed data"] --> T
-    T --> H["H2O AutoML or estimator"]
-    H --> M["MLflow runs and artifacts"]
-    M --> R["Model Registry - champion alias"]
-    H --> V["Shared native-model volume"]
-    R --> A["FastAPI prediction API"]
-    V -.->|fallback| A
-    A --> S["Streamlit frontend"]
+```text
+YAML experiment config ----\
+                            +--> train.py --> H2O training --> MLflow --> Model Registry --\
+Local raw/processed data --/                 |                                         |
+                                             +--> shared native-model volume -----------+--> FastAPI --> Streamlit
 ```
 
 ## Dataset
@@ -52,19 +46,11 @@ confusion matrix.
 
 ## Experiment workflow
 
-```mermaid
-flowchart TD
-    A["Choose or copy a YAML config"] --> B["Validate config and load data"]
-    B --> C["Use predefined test set or stratified split"]
-    C --> D["Apply selected feature version"]
-    D --> E{"algorithm: AutoML?"}
-    E -- Yes --> F["Train candidates and select leader"]
-    E -- No --> G["Create estimator with model factory"]
-    F --> H["Threshold-aware evaluation"]
-    G --> H
-    H --> I["Log MLflow run, metrics, plots, tables, model"]
-    I --> J["Register model and move champion alias"]
-    J --> K["Atomically publish inference metadata"]
+```text
+Choose YAML config --> validate and load data --> select evaluation data
+  --> apply feature version --> train AutoML candidates or explicit estimator
+  --> threshold-aware evaluation --> log MLflow run and artifacts
+  --> register champion alias --> atomically publish inference metadata
 ```
 
 From `backend`, launch any experiment without editing Python:
