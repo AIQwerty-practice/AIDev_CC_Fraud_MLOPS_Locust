@@ -23,8 +23,10 @@ docker run --rm -p 80:80 \
   -v /var/lib/letsencrypt:/var/lib/letsencrypt \
   certbot/certbot certonly --standalone --non-interactive --agree-tos \
   --email "$CERTBOT_EMAIL" \
-  -d fraud.barbaraplascencia.com \
-  -d app.barbaraplascencia.com \
-  -d api.barbaraplascencia.com \
-  -d mlflow.barbaraplascencia.com \
-  -d h2o.barbaraplascencia.com
+  --cert-name yourdomain.com \
+  -d yourdomain.com \
+  -d fraud.yourdomain.com \
+  -d app.yourdomain.com \
+  -d api.yourdomain.com \
+  -d mlflow.yourdomain.com \
+  -d locust.yourdomain.com

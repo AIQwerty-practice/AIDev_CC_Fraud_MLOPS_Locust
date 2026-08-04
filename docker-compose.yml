@@ -12,8 +12,8 @@ services:
         import os,socket;
         ip=socket.gethostbyname(socket.gethostname());
         os.execvp('java',['java','-jar','/usr/local/lib/python3.11/site-packages/h2o/backend/bin/h2o.jar','-ip',ip,'-port','54321','-name','fraud-h2o','-allow_unsupported_java'])
-    ports:
-      - "${H2O_BIND_ADDRESS:-127.0.0.1}:54321:54321"
+    expose:
+      - "54321"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket,urllib.request; urllib.request.urlopen(f'http://{socket.gethostbyname(socket.gethostname())}:54321/3/Cloud')"]
       interval: 10s

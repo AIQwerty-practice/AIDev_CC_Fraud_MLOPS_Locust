@@ -10,17 +10,11 @@ We suggest to run the app and containers on chrome with dark mode theme in your 
 You can do this in the Google Chrome browser by going to Settings > Appearance > Mode and selecting "Dark"
 ## Architecture
 
-```mermaid
-flowchart LR
-    C["YAML experiment config"] --> T["train.py"]
-    D["Local raw/processed data"] --> T
-    T --> H["H2O AutoML or estimator"]
-    H --> M["MLflow runs and artifacts"]
-    M --> R["Model Registry - champion alias"]
-    H --> V["Shared native-model volume"]
-    R --> A["FastAPI prediction API"]
-    V -.->|fallback| A
-    A --> S["Streamlit frontend"]
+```text
+YAML experiment config ----\
+                            +--> train.py --> H2O training --> MLflow --> Model Registry --\
+Local raw/processed data --/                 |                                         |
+                                             +--> shared native-model volume -----------+--> FastAPI --> Streamlit
 ```
 
 ## Dataset
@@ -52,19 +46,11 @@ confusion matrix.
 
 ## Experiment workflow
 
-```mermaid
-flowchart TD
-    A["Choose or copy a YAML config"] --> B["Validate config and load data"]
-    B --> C["Use predefined test set or stratified split"]
-    C --> D["Apply selected feature version"]
-    D --> E{"algorithm: AutoML?"}
-    E -- Yes --> F["Train candidates and select leader"]
-    E -- No --> G["Create estimator with model factory"]
-    F --> H["Threshold-aware evaluation"]
-    G --> H
-    H --> I["Log MLflow run, metrics, plots, tables, model"]
-    I --> J["Register model and move champion alias"]
-    J --> K["Atomically publish inference metadata"]
+```text
+Choose YAML config --> validate and load data --> select evaluation data
+  --> apply feature version --> train AutoML candidates or explicit estimator
+  --> threshold-aware evaluation --> log MLflow run and artifacts
+  --> register champion alias --> atomically publish inference metadata
 ```
 
 From `backend`, launch any experiment without editing Python:
@@ -258,263 +244,124 @@ Docker definitions, requirements, documentation, and sample CSVs remain versione
 
 ## AWS EC2 production deployment
 
-Production uses the local Compose definition plus `docker-compose.prod.yml`. The
-base file retains local loopback access, while the production overlay adds an
-Nginx HTTPS reverse proxy and environment-rendered landing page. MLflow, FastAPI,
-Streamlit, and H2O remain on the private Docker network; only Nginx publishes
-ports 80 and 443 publicly.
+Production combines the base Compose file with the production overlay. Nginx is
+the only service that publishes public ports (80 and 443). H2O is available only
+to containers on `project_network`; it has no public Nginx route, DNS record, or
+host port.
 
-### Production URLs
+### Example addresses
 
-| Service | URL |
+| Purpose | Address |
 |---|---|
-| Landing page | https://fraud.yourdomain.com |
-| Streamlit | https://app.yourdomain.com |
+| Apex landing page | https://yourdomain.com |
+| Landing page alias | https://fraud.yourdomain.com |
+| Streamlit app | https://app.yourdomain.com |
 | FastAPI | https://api.yourdomain.com |
-| Swagger | https://api.yourdomain.com/docs |
-| Health | https://api.yourdomain.com/health |
 | MLflow | https://mlflow.yourdomain.com |
-| H2O Flow | https://h2o.yourdomain.com |
-| GitHub | https://github.com/AIQwerty-practice/AIDev_CC_Fraud_MLOPS |
+| Locust | https://locust.yourdomain.com |
 
-### EC2 prerequisites
+The FastAPI documentation is at `https://api.yourdomain.com/docs` and its health
+endpoint is at `https://api.yourdomain.com/health`. Locust's dataset manager is
+at `https://locust.yourdomain.com/dataset`.
+
+### EC2 and DNS prerequisites
 
 Use a current Ubuntu LTS EC2 instance with enough memory for H2O training (8 GB
-minimum is a practical starting point), attach an Elastic IP, and install Docker:
+RAM or more is recommended), Docker Engine with the Compose plugin, Git, an
+Elastic IP, and inbound security-group rules for SSH (22, restricted to trusted
+addresses), HTTP (80), and HTTPS (443). Do not open ports 5000, 8000, 8089,
+8501, or 54321.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl git
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker "$USER"
-newgrp docker
-git clone https://github.com/AIQwerty-practice/AIDev_CC_Fraud_MLOPS.git
-cd AIDev_CC_Fraud_MLOPS
-cp .env.example .env
-```
+Create these DNS A records, all pointing to the EC2 Elastic IP:
 
-Edit `.env`, especially `CERTBOT_EMAIL`. Do not commit `.env`. Place the Kaggle
-dataset at `backend/data/raw/creditcard.csv`, then preprocess it as documented in
-the Dataset section. The trainer mounts `backend/data` read-only.
-
-### DNS records
-
-Create these records after assigning the EC2 Elastic IP:
-
-| Type | Host | Value |
+| Type | Name | Target |
 |---|---|---|
+| A | `@` | EC2 Elastic IP |
 | A | `fraud` | EC2 Elastic IP |
 | A | `app` | EC2 Elastic IP |
 | A | `api` | EC2 Elastic IP |
 | A | `mlflow` | EC2 Elastic IP |
-| A | `h2o` | EC2 Elastic IP |
+| A | `locust` | EC2 Elastic IP |
 
-Wait for all names to resolve to the Elastic IP before requesting certificates.
+Do not create an H2O DNS record.
 
-### EC2 security group
+### Clone and configure
 
-Allow inbound traffic only as follows:
+Replace `your-account` only with the account that hosts the repository; keep
+the repository folder name unchanged:
 
-| Port | Source | Purpose |
-|---|---|---|
-| 22/TCP | Your administrator IP/CIDR | SSH |
-| 80/TCP | `0.0.0.0/0`, `::/0` | HTTP redirect and certificate validation |
-| 443/TCP | `0.0.0.0/0`, `::/0` | HTTPS applications |
+```bash
+git clone https://github.com/your-account/AIDev_CC_Fraud_MLOPS_Locust.git
+cd AIDev_CC_Fraud_MLOPS_Locust
+cp .env.example .env
+```
 
-Do not open 5000, 8000, 8501, or 54321. Those ports bind to EC2 loopback and
-are reached by Nginx through Docker service names.
+Edit `.env` on EC2, set a real `CERTBOT_EMAIL`, and replace reusable placeholder
+values only for the actual deployment. Never commit `.env`.
 
-### HTTPS certificates
+Ensure the processed training dataset expected by the trainer exists:
 
-After DNS propagation, make the scripts executable and request one certificate
-covering all subdomains:
+```text
+backend/data/processed/train.csv
+```
+
+### Certificates
+
+After all six DNS records resolve to the EC2 Elastic IP and port 80 is free:
 
 ```bash
 chmod +x deploy/aws/*.sh
 ./deploy/aws/bootstrap-certificates.sh
 ```
 
-Equivalent Certbot domains are:
+The script requests one certificate named `yourdomain.com` covering the apex,
+landing alias, Streamlit, FastAPI, MLflow, and Locust addresses. H2O is
+intentionally excluded. To renew manually:
 
 ```bash
-sudo certbot certonly --standalone \
-  -d fraud.yourdomain.com \
-  -d app.yourdomain.com \
-  -d api.yourdomain.com \
-  -d mlflow.yourdomain.com \
-  -d h2o.yourdomain.com
+./deploy/aws/renew-certificates.sh
 ```
 
-Certificates and private keys stay under `/etc/letsencrypt` and must never be
-committed. Nginx redirects HTTP to HTTPS. Schedule renewal with root's crontab:
+Example cron entry:
 
 ```cron
-15 3 * * * /absolute/path/AIDev_CC_Fraud_MLOPS/deploy/aws/renew-certificates.sh >> /var/log/fraud-certbot.log 2>&1
+15 3 * * * /absolute/path/AIDev_CC_Fraud_MLOPS_Locust/deploy/aws/renew-certificates.sh >> /var/log/fraud-certbot.log 2>&1
 ```
 
-### Deploy and restart
+### Start and operate production
 
-Initial deployment:
+Use both Compose files for every production command:
+
+```bash
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml config
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml ps
+```
+
+The deployment helper runs the same standard startup command:
 
 ```bash
 ./deploy/aws/deploy.sh
 ```
 
-Routine update and restart:
-
-```bash
-git pull --ff-only
-docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml ps
-```
-
-View logs and restart individual services:
+Useful operations:
 
 ```bash
 docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml logs -f
-docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml restart proxy backend frontend
-```
-
-Stop production without deleting persistent MLflow/model volumes:
-
-```bash
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml exec proxy nginx -t
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml restart proxy backend frontend locust
 docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml down
 ```
 
-Do not use `down -v` in production unless persistent experiment and model state is
-intentionally being destroyed.
+The production Locust service runs one process so uploaded datasets and its
+in-memory active-dataset state remain consistent. Open
+`https://locust.yourdomain.com/dataset` to upload a labeled or unlabeled CSV,
+then return to Locust to set users and spawn rate. Locust sends traffic to the
+internal FastAPI address `http://backend:8000`.
 
-### Reverse proxy behavior
+### Production checks and security
 
-Nginx routes the five production hostnames to `landing`, `frontend`, `backend`,
-`mlflow`, and `h2o`. It forwards the original host, client address, and HTTPS
-scheme. Streamlit receives WebSocket upgrade headers and disabled proxy buffering.
-FastAPI trusts forwarded headers only inside the production Docker network and
-CORS allows only the configured landing and Streamlit origins.
-
-### Production hardening recommendations
-
-- Put authentication in front of MLflow and H2O Flow before allowing general internet access.
-- Back up the `mlflow_data` and `model_artifacts` volumes regularly.
-- Use AWS Systems Manager Session Manager instead of public SSH where possible.
-- Store operational secrets in AWS Systems Manager Parameter Store or Secrets Manager.
-- Add CloudWatch log shipping, uptime alerts, and disk/memory monitoring.
-- Pin container image and Python dependency versions after validation.
-
-  ## AWS EC2 Production Deployment
-
-The EC2 deployment uses a separate Docker Compose configuration and Nginx reverse proxy. It should not be started with the local `docker-compose.yml`.
-
-### Production requirements
-
-Before deploying, confirm that the EC2 instance has:
-
-- Ubuntu with Docker Engine and Docker Compose installed
-- A public IPv4 address, preferably an AWS Elastic IP
-- Security Group inbound rules for:
-  - `22` — SSH, restricted to the administrator's IP when possible
-  - `80` — HTTP
-  - `443` — HTTPS
-- DNS records pointing to the EC2 public IP:
-  - `yourdomain.com`
-  - `fraud.yourdomain.com`
-  - `app.yourdomain.com`
-  - `api.yourdomain.com`
-  - `mlflow.yourdomain.com`
-
-Ports `5000`, `8000`, and `8501` do not need to be publicly exposed when all traffic is routed through Nginx.
-
-### Production configuration files
-
-| File | Purpose |
-|---|---|
-| `docker-compose.prod.yml` | Defines the production containers, networks, volumes, health checks, and Nginx service |
-| `.env` | Stores deployment-specific environment variables and secrets |
-| `.env.example` | Documents the required variables without containing real secrets |
-| `deploy/nginx/` | Contains Nginx virtual-host and reverse-proxy configuration |
-| `index.html` | Provides the main project landing page |
-
-
-
-The `.env` file must be created directly on EC2 and must not be committed to GitHub.
-```bash
-cp .env.example .env
-nano .env
-chmod 600 .env
-```
-Validate the production configuration before starting it:
-```bash
-docker compose --env-file .env -f docker-compose.prod.yml config --quiet
-```
-Start the production stack
-
-Run these commands from the repository directory:
-```bash
-docker compose --env-file .env -f docker-compose.prod.yml up -d --build
-```
-Check the container status:
-```bash
-docker compose --env-file .env -f docker-compose.prod.yml ps
-```
-
-Review logs if a service is unavailable:
-```bash
-docker compose --env-file .env -f docker-compose.prod.yml logs --tail=150 
-```
-Nginx reverse proxy
-
-Nginx is the public entry point for the application. It receives traffic on ports 80 and 443 and routes each hostname to the appropriate Docker service:
-
-Public address	Internal service
-yourdomain.com	or fraud.yourdomain.com Project landing page
-app.yourdomain.com	Streamlit frontend
-api.yourdomain.com	FastAPI backend
-mlflow.yourdomain.com	MLflow tracking server
-
-Nginx communicates with the services using Docker service names and internal ports. Therefore, its upstream addresses must match the service names defined in docker-compose.prod.yml.
-
-If Nginx returns:
-
-404 Not Found: verify the hostname and Nginx server_name configuration.
-502 Bad Gateway: verify that the destination container is running, healthy, and listening on the expected internal port.
-A certificate warning: replace temporary self-signed certificates with trusted certificates before public use.
-
-After modifying the Nginx configuration, validate it inside the container:
-
-```bash
- docker compose --env-file .env -f docker-compose.prod.yml exec nginx nginx -t
-```
-Then reload Nginx:
-```bash
- docker compose --env-file .env -f docker-compose.prod.yml exec nginx nginx -s reload
-```
-
-If the Nginx container itself was changed, recreate it:
-
-```bash
-docker compose --env-file .env -f docker-compose.prod.yml up -d --build nginx
-```
-Stop or restart production
-
-Stop and remove the containers while preserving named volumes:
-```bash
- docker compose --env-file .env -f docker-compose.prod.yml down
-```
-Restart the stack:
-```bash
- docker compose --env-file .env -f docker-compose.prod.yml up -d
-```
-Do not use down -v unless the Docker volumes and their stored data are intentionally being deleted.
-
-Deployment considerations
-Use an Elastic IP so DNS records do not need to be updated whenever the EC2 instance is stopped and restarted.
-Never commit .env, private keys, passwords, tokens, or TLS private keys.
-Keep MLflow data and model artifacts in persistent Docker volumes or EC2-mounted directories.
-Confirm that all containers are healthy before testing the public URLs.
-A short interruption may occur when the Nginx container is recreated.
-Use trusted TLS certificates, such as Let's Encrypt certificates, for a public production deployment.
-Back up persistent MLflow data and model artifacts before major upgrades.
-
-
-One small correction to consider: if your current Security Group still exposes ports `5000`, `8000`, and `8501` publicly, you can eventually remove those inbound rules after confirming Nginx successfully provides access through ports `80/443`. This reduces unnecessary public exposure.
- 
+Verify all six HTTPS addresses, the API health endpoint, the Locust dataset page,
+and persistent MLflow/model volumes after deployment. Nginx forwards the original
+host, client address, and HTTPS scheme. Add authentication before exposing MLflow
+or Locust to untrusted users. Keep H2O private to the Docker network.

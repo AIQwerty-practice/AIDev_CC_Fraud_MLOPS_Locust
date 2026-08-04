@@ -6,7 +6,7 @@ cd "$PROJECT_ROOT"
 
 [[ -f .env ]] || { echo "Missing .env; copy .env.example and configure it." >&2; exit 1; }
 [[ -f backend/data/processed/train.csv ]] || { echo "Missing processed training data." >&2; exit 1; }
-[[ -f /etc/letsencrypt/live/fraud.barbaraplascencia.com/fullchain.pem ]] || {
+[[ -f /etc/letsencrypt/live/yourdomain.com/fullchain.pem ]] || {
   echo "TLS certificate missing; run deploy/aws/bootstrap-certificates.sh first." >&2
   exit 1
 }
